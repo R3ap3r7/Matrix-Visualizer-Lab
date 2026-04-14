@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Play, Pause, SkipBack, SkipForward, FastForward, RefreshCcw, Terminal, Zap, X, Database } from 'lucide-react';
 
-type Matrix = (number | string)[][];
+type Matrix = string[][];
 
 interface Step {
   row: number;
@@ -24,21 +24,21 @@ const SPEEDS = [
   { label: '4x', value: 125 }
 ];
 
-// Helper to format numbers as requested: .089 instead of 0.089, strip trailing zeros
-const formatNum = (n: number | string): string => {
-  if (n === '') return '';
-  const num = Number(n);
+// Display formatter: .089 instead of 0.089, strips trailing zeros automatically
+const formatDisplay = (val: string | number): string => {
+  if (val === '' || val === undefined) return '';
+  const num = Number(val);
   if (isNaN(num)) return '0';
+  
   let s = num.toString();
-  // Remove leading zero before decimal
-  if (s.startsWith('0.')) s = s.substring(1);
-  if (s.startsWith('-0.')) s = '-' + s.substring(2);
+  // Remove leading zero before decimal: 0.5 -> .5, -0.5 -> -.5
+  s = s.replace(/^(-?)0\./, '$1.');
   return s;
 };
 
 function App() {
-  const [matrixA, setMatrixA] = useState<Matrix>(Array(DEFAULT_ROWS).fill(0).map(() => Array(DEFAULT_COLS).fill(0)));
-  const [matrixB, setMatrixB] = useState<Matrix>(Array(DEFAULT_COLS).fill(0).map(() => Array(DEFAULT_COLS).fill(0)));
+  const [matrixA, setMatrixA] = useState<Matrix>(Array(DEFAULT_ROWS).fill('').map(() => Array(DEFAULT_COLS).fill('0')));
+  const [matrixB, setMatrixB] = useState<Matrix>(Array(DEFAULT_COLS).fill('').map(() => Array(DEFAULT_COLS).fill('0')));
   
   const [rowsAInput, setRowsAInput] = useState(DEFAULT_ROWS.toString());
   const [colsAInput, setColsAInput] = useState(DEFAULT_COLS.toString());
@@ -56,12 +56,9 @@ function App() {
   const [modalTextA, setModalTextA] = useState('');
   const [modalTextB, setModalTextB] = useState('');
 
-  const progressRef = useRef<HTMLDivElement>(null);
+  const [focusedCell, setFocusedCell] = useState<{ matrix: 'A' | 'B', r: number, c: number } | null>(null);
 
-  // Dynamic sizing
-  const maxDim = Math.max(rowsA, colsA, colsB);
-  const cellSize = Math.max(24, Math.min(60, 400 / maxDim));
-  const fontSize = Math.max(0.4, Math.min(1.1, 4 / maxDim)) + 'rem';
+  const progressRef = useRef<HTMLDivElement>(null);
 
   const steps = useMemo(() => {
     const allSteps: Step[] = [];
@@ -70,11 +67,11 @@ function App() {
         let sum = 0;
         const calcParts: string[] = [];
         for (let k = 0; k < colsA; k++) {
-          const valA = Number(matrixA[i]?.[k]) || 0;
-          const valB = Number(matrixB[k]?.[j]) || 0;
+          const valA = parseFloat(matrixA[i]?.[k]) || 0;
+          const valB = parseFloat(matrixB[k]?.[j]) || 0;
           const product = valA * valB;
           sum += product;
-          calcParts.push(`${formatNum(valA)}×${formatNum(valB)}`);
+          calcParts.push(`${formatDisplay(valA)}×${formatDisplay(valB)}`);
           
           allSteps.push({
             row: i,
@@ -104,24 +101,6 @@ function App() {
     return result;
   }, [rowsA, colsB, steps, currentStepIndex]);
 
-  const syncMatrices = useCallback((rA: number, cA: number, cB: number) => {
-    setMatrixA(prev => Array(rA).fill(0).map((_, i) => {
-      const row = prev[i] || Array(cA).fill(0);
-      if (row.length === cA) return row;
-      const nextRow = [...row];
-      while (nextRow.length < cA) nextRow.push(0);
-      nextRow.length = cA;
-      return nextRow;
-    }));
-    setMatrixB(prev => Array(cA).fill(0).map((_, i) => {
-      const row = prev[i] || Array(cB).fill(0);
-      const nextRow = [...row];
-      while (nextRow.length < cB) nextRow.push(0);
-      nextRow.length = cB;
-      return nextRow;
-    }));
-  }, []);
-
   const handleUpdateDimensions = (type: 'rowsA' | 'colsA' | 'colsB', valStr: string) => {
     if (valStr === '') {
       if (type === 'rowsA') setRowsAInput('');
@@ -133,25 +112,42 @@ function App() {
     if (isNaN(v)) return;
     v = Math.max(1, Math.min(MAX_DIM, v));
     
-    if (type === 'rowsA') {
-      setRowsAInput(v.toString());
-      syncMatrices(v, colsA, colsB);
-    } else if (type === 'colsA') {
-      setColsAInput(v.toString());
-      syncMatrices(rowsA, v, colsB);
-    } else if (type === 'colsB') {
-      setColsBInput(v.toString());
-      syncMatrices(rowsA, colsA, v);
-    }
+    if (type === 'rowsA') setRowsAInput(v.toString());
+    else if (type === 'colsA') setColsAInput(v.toString());
+    else if (type === 'colsB') setColsBInput(v.toString());
+
+    // Sync matrix arrays
+    const newRA = type === 'rowsA' ? v : rowsA;
+    const newCA = type === 'colsA' ? v : colsA;
+    const newCB = type === 'colsB' ? v : colsB;
+
+    setMatrixA(prev => Array(newRA).fill('').map((_, i) => {
+      const row = prev[i] || Array(newCA).fill('0');
+      const nextRow = [...row];
+      while (nextRow.length < newCA) nextRow.push('0');
+      nextRow.length = newCA;
+      return nextRow;
+    }));
+    setMatrixB(prev => Array(newCA).fill('').map((_, i) => {
+      const row = prev[i] || Array(newCB).fill('0');
+      const nextRow = [...row];
+      while (nextRow.length < newCB) nextRow.push('0');
+      nextRow.length = newCB;
+      return nextRow;
+    }));
+
     setCurrentStepIndex(-1);
     setIsPlaying(false);
   };
 
   const handleUpdateCell = (matrix: 'A' | 'B', r: number, c: number, value: string) => {
+    // Only allow characters that could form a valid number eventually
+    if (!/^-?\d*\.?\d*$/.test(value)) return;
+
     if (matrix === 'A') {
       const newA = [...matrixA];
       newA[r] = [...newA[r]];
-      newA[r][c] = value; // Keep as string while typing
+      newA[r][c] = value;
       setMatrixA(newA);
     } else {
       const newB = [...matrixB];
@@ -163,26 +159,24 @@ function App() {
   };
 
   const handleBlurCell = (matrix: 'A' | 'B', r: number, c: number) => {
+    setFocusedCell(null);
     if (matrix === 'A') {
       const newA = [...matrixA];
-      newA[r][c] = Number(newA[r][c]) || 0; // Default to 0 on blur
+      const val = newA[r][c];
+      if (val === '' || val === '-' || val === '.' || val === '-.') newA[r][c] = '0';
+      else newA[r][c] = parseFloat(val).toString();
       setMatrixA(newA);
     } else {
       const newB = [...matrixB];
-      newB[r][c] = Number(newB[r][c]) || 0;
+      const val = newB[r][c];
+      if (val === '' || val === '-' || val === '.' || val === '-.') newB[r][c] = '0';
+      else newB[r][c] = parseFloat(val).toString();
       setMatrixB(newB);
     }
   };
 
-  const handleRandomize = () => {
-    setMatrixA(prev => prev.map(row => row.map(() => Math.floor(Math.random() * 10))));
-    setMatrixB(prev => prev.map(row => row.map(() => Math.floor(Math.random() * 10))));
-    setCurrentStepIndex(-1);
-    setIsPlaying(false);
-  };
-
   const handleInitializeTerminal = () => {
-    const parse = (text: string) => text.trim().split('\n').map(r => r.trim().split(/[\s,]+/).map(v => parseFloat(v) || 0));
+    const parse = (text: string) => text.trim().split('\n').map(r => r.trim().split(/[\s,]+/).map(v => v || '0'));
     const dataA = parse(modalTextA);
     const dataB = parse(modalTextB);
 
@@ -216,6 +210,11 @@ function App() {
     const targetStep = Math.floor(percentage * (steps.length + 1)) - 1;
     setCurrentStepIndex(Math.max(-1, Math.min(steps.length, targetStep)));
   };
+
+  // Dynamic Sizing
+  const maxDim = Math.max(rowsA, colsA, colsB);
+  const cellSize = Math.max(22, Math.min(60, 450 / maxDim));
+  const fontSize = Math.max(0.4, Math.min(1.1, 4.5 / maxDim)) + 'rem';
 
   const nextStep = useCallback(() => setCurrentStepIndex(prev => Math.min(steps.length, prev + 1)), [steps.length]);
   const prevStep = () => setCurrentStepIndex(prev => Math.max(-1, prev - 1));
@@ -252,7 +251,12 @@ function App() {
           }}>
             <Terminal size={14} /> MANUAL ENTRY
           </button>
-          <button className="hub-btn" onClick={handleRandomize}>
+          <button className="hub-btn" onClick={() => {
+            setMatrixA(prev => prev.map(row => row.map(() => Math.floor(Math.random() * 10).toString())));
+            setMatrixB(prev => prev.map(row => row.map(() => Math.floor(Math.random() * 10).toString())));
+            setCurrentStepIndex(-1);
+            setIsPlaying(false);
+          }}>
             <Database size={14} /> RANDOMIZE
           </button>
           
@@ -284,8 +288,9 @@ function App() {
                   <div key={`a-${r}-${c}`} className={`cell-cinematic ${currentStep?.row === r ? 'active-row-glow' : ''} ${currentStep?.row === r && currentStep?.k === c ? 'focus-cell-a' : ''}`} style={{ width: cellSize, height: cellSize }}>
                     <input 
                       type="text" 
-                      value={formatNum(val)} 
+                      value={(focusedCell?.matrix === 'A' && focusedCell.r === r && focusedCell.c === c) ? val : formatDisplay(val)} 
                       onChange={e => handleUpdateCell('A', r, c, e.target.value)} 
+                      onFocus={() => setFocusedCell({ matrix: 'A', r, c })}
                       onBlur={() => handleBlurCell('A', r, c)}
                     />
                   </div>
@@ -304,8 +309,9 @@ function App() {
                   <div key={`b-${r}-${c}`} className={`cell-cinematic ${currentStep?.col === c ? 'active-col-glow' : ''} ${currentStep?.col === c && currentStep?.k === r ? 'focus-cell-b' : ''}`} style={{ width: cellSize, height: cellSize }}>
                     <input 
                       type="text" 
-                      value={formatNum(val)} 
+                      value={(focusedCell?.matrix === 'B' && focusedCell.r === r && focusedCell.c === c) ? val : formatDisplay(val)} 
                       onChange={e => handleUpdateCell('B', r, c, e.target.value)} 
+                      onFocus={() => setFocusedCell({ matrix: 'B', r, c })}
                       onBlur={() => handleBlurCell('B', r, c)}
                     />
                   </div>
@@ -326,12 +332,12 @@ function App() {
                   return (
                     <div key={`c-${r}-${c}`} className={`cell-cinematic ${isActive ? 'target-cell-glow' : ''}`} style={{ width: cellSize, height: cellSize }}>
                       <span className={`result-text ${(isDone || isActive) ? 'done' : ''}`}>
-                        {isActive ? formatNum(currentStep.currentSum) : formatNum(val)}
+                        {isActive ? formatDisplay(currentStep.currentSum) : formatDisplay(val)}
                       </span>
                       {isActive && (
                         <div className="glass-math-popover">
                           <div className="popover-calc">{currentStep.calculation}</div>
-                          <div className="popover-result">= {formatNum(currentStep.currentSum)}</div>
+                          <div className="popover-result">= {formatDisplay(currentStep.currentSum)}</div>
                         </div>
                       )}
                     </div>
@@ -359,13 +365,7 @@ function App() {
           <div className="playback-meta">
             <div className="discrete-speeds">
               {SPEEDS.map(s => (
-                <button 
-                  key={s.label} 
-                  className={`speed-toggle ${speed === s.value ? 'active' : ''}`}
-                  onClick={() => setSpeed(s.value)}
-                >
-                  {s.label}
-                </button>
+                <button key={s.label} className={`speed-toggle ${speed === s.value ? 'active' : ''}`} onClick={() => setSpeed(s.value)}>{s.label}</button>
               ))}
             </div>
             <div className="progress-track" ref={progressRef} onClick={handleProgressClick}>
