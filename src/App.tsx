@@ -7,7 +7,7 @@ interface Step {
   row: number;
   col: number;
   k: number;
-  calculation: string;
+  calculationLines: string[];
   currentSum: number;
   isComplete: boolean;
 }
@@ -24,15 +24,22 @@ const SPEEDS = [
   { label: '4x', value: 125 }
 ];
 
-// Display formatter: .089 instead of 0.089, strips trailing zeros automatically
 const formatDisplay = (val: string | number): string => {
   if (val === '' || val === undefined) return '';
-  const num = Number(val);
+  let num = typeof val === 'string' ? parseFloat(val) : val;
   if (isNaN(num)) return '0';
   
+  if (!Number.isInteger(num)) {
+    num = Math.round(num * 1e8) / 1e8;
+  }
+
   let s = num.toString();
-  // Remove leading zero before decimal: 0.5 -> .5, -0.5 -> -.5
   s = s.replace(/^(-?)0\./, '$1.');
+  
+  if (s.length > 12) {
+    s = num.toExponential(4);
+  }
+  
   return s;
 };
 
@@ -73,11 +80,17 @@ function App() {
           sum += product;
           calcParts.push(`${formatDisplay(valA)}×${formatDisplay(valB)}`);
           
+          // Group into lines of 6 additions
+          const lines: string[] = [];
+          for (let m = 0; m < calcParts.length; m += 6) {
+            lines.push(calcParts.slice(m, m + 6).join(' + '));
+          }
+          
           allSteps.push({
             row: i,
             col: j,
             k: k,
-            calculation: calcParts.join(' + '),
+            calculationLines: lines,
             currentSum: sum,
             isComplete: k === colsA - 1
           });
@@ -101,6 +114,23 @@ function App() {
     return result;
   }, [rowsA, colsB, steps, currentStepIndex]);
 
+  const maxContentLength = useMemo(() => {
+    let max = 1;
+    const check = (val: string | number) => {
+      const s = formatDisplay(val);
+      if (s.length > max) max = s.length;
+    };
+    matrixA.flat().forEach(check);
+    matrixB.flat().forEach(check);
+    matrixC.flat().forEach(check);
+    return max;
+  }, [matrixA, matrixB, matrixC]);
+
+  const dimFactor = Math.max(rowsA, colsA, colsB);
+  const cellSizeW = Math.max(32, Math.min(180, (maxContentLength * 10) + 16));
+  const cellSizeH = Math.max(24, Math.min(60, 480 / dimFactor));
+  const fontSize = Math.max(0.4, Math.min(1.1, 5 / (dimFactor * (1 + maxContentLength/15)))) + 'rem';
+
   const handleUpdateDimensions = (type: 'rowsA' | 'colsA' | 'colsB', valStr: string) => {
     if (valStr === '') {
       if (type === 'rowsA') setRowsAInput('');
@@ -116,7 +146,6 @@ function App() {
     else if (type === 'colsA') setColsAInput(v.toString());
     else if (type === 'colsB') setColsBInput(v.toString());
 
-    // Sync matrix arrays
     const newRA = type === 'rowsA' ? v : rowsA;
     const newCA = type === 'colsA' ? v : colsA;
     const newCB = type === 'colsB' ? v : colsB;
@@ -141,9 +170,7 @@ function App() {
   };
 
   const handleUpdateCell = (matrix: 'A' | 'B', r: number, c: number, value: string) => {
-    // Only allow characters that could form a valid number eventually
-    if (!/^-?\d*\.?\d*$/.test(value)) return;
-
+    if (value !== '' && !/^-?\d*\.?\d*$/.test(value)) return;
     if (matrix === 'A') {
       const newA = [...matrixA];
       newA[r] = [...newA[r]];
@@ -210,11 +237,6 @@ function App() {
     const targetStep = Math.floor(percentage * (steps.length + 1)) - 1;
     setCurrentStepIndex(Math.max(-1, Math.min(steps.length, targetStep)));
   };
-
-  // Dynamic Sizing
-  const maxDim = Math.max(rowsA, colsA, colsB);
-  const cellSize = Math.max(22, Math.min(60, 450 / maxDim));
-  const fontSize = Math.max(0.4, Math.min(1.1, 4.5 / maxDim)) + 'rem';
 
   const nextStep = useCallback(() => setCurrentStepIndex(prev => Math.min(steps.length, prev + 1)), [steps.length]);
   const prevStep = () => setCurrentStepIndex(prev => Math.max(-1, prev - 1));
@@ -283,9 +305,9 @@ function App() {
             {/* Matrix A */}
             <div className="matrix-bracket-wrap">
               <div className="matrix-bracket left"></div>
-              <div className="matrix-grid-cinematic" style={{ gridTemplateColumns: `repeat(${colsA}, ${cellSize}px)`, fontSize }}>
+              <div className="matrix-grid-cinematic" style={{ gridTemplateColumns: `repeat(${colsA}, ${cellSizeW}px)`, fontSize }}>
                 {matrixA.map((row, r) => row.map((val, c) => (
-                  <div key={`a-${r}-${c}`} className={`cell-cinematic ${currentStep?.row === r ? 'active-row-glow' : ''} ${currentStep?.row === r && currentStep?.k === c ? 'focus-cell-a' : ''}`} style={{ width: cellSize, height: cellSize }}>
+                  <div key={`a-${r}-${c}`} className={`cell-cinematic ${currentStep?.row === r ? 'active-row-glow' : ''} ${currentStep?.row === r && currentStep?.k === c ? 'focus-cell-a' : ''}`} style={{ width: cellSizeW, height: cellSizeH }}>
                     <input 
                       type="text" 
                       value={(focusedCell?.matrix === 'A' && focusedCell.r === r && focusedCell.c === c) ? val : formatDisplay(val)} 
@@ -304,9 +326,9 @@ function App() {
             {/* Matrix B */}
             <div className="matrix-bracket-wrap">
               <div className="matrix-bracket left"></div>
-              <div className="matrix-grid-cinematic" style={{ gridTemplateColumns: `repeat(${colsB}, ${cellSize}px)`, fontSize }}>
+              <div className="matrix-grid-cinematic" style={{ gridTemplateColumns: `repeat(${colsB}, ${cellSizeW}px)`, fontSize }}>
                 {matrixB.map((row, r) => row.map((val, c) => (
-                  <div key={`b-${r}-${c}`} className={`cell-cinematic ${currentStep?.col === c ? 'active-col-glow' : ''} ${currentStep?.col === c && currentStep?.k === r ? 'focus-cell-b' : ''}`} style={{ width: cellSize, height: cellSize }}>
+                  <div key={`b-${r}-${c}`} className={`cell-cinematic ${currentStep?.col === c ? 'active-col-glow' : ''} ${currentStep?.col === c && currentStep?.k === r ? 'focus-cell-b' : ''}`} style={{ width: cellSizeW, height: cellSizeH }}>
                     <input 
                       type="text" 
                       value={(focusedCell?.matrix === 'B' && focusedCell.r === r && focusedCell.c === c) ? val : formatDisplay(val)} 
@@ -325,18 +347,24 @@ function App() {
             {/* Matrix C */}
             <div className="matrix-bracket-wrap">
               <div className="matrix-bracket left"></div>
-              <div className="matrix-grid-cinematic" style={{ gridTemplateColumns: `repeat(${colsB}, ${cellSize}px)`, fontSize }}>
+              <div className="matrix-grid-cinematic" style={{ gridTemplateColumns: `repeat(${colsB}, ${cellSizeW}px)`, fontSize }}>
                 {matrixC.map((row, r) => row.map((val, c) => {
                   const isActive = currentStep?.row === r && currentStep?.col === c;
                   const isDone = steps.some((s, i) => i <= currentStepIndex && s.row === r && s.col === c && s.isComplete);
                   return (
-                    <div key={`c-${r}-${c}`} className={`cell-cinematic ${isActive ? 'target-cell-glow' : ''}`} style={{ width: cellSize, height: cellSize }}>
+                    <div key={`c-${r}-${c}`} className={`cell-cinematic ${isActive ? 'target-cell-glow' : ''}`} style={{ width: cellSizeW, height: cellSizeH }}>
                       <span className={`result-text ${(isDone || isActive) ? 'done' : ''}`}>
                         {isActive ? formatDisplay(currentStep.currentSum) : formatDisplay(val)}
                       </span>
                       {isActive && (
                         <div className="glass-math-popover">
-                          <div className="popover-calc">{currentStep.calculation}</div>
+                          <div className="popover-calc">
+                            {currentStep.calculationLines.map((line, idx) => (
+                              <div key={idx} className="popover-calc-line">
+                                {line}{idx < currentStep.calculationLines.length - 1 ? ' +' : ''}
+                              </div>
+                            ))}
+                          </div>
                           <div className="popover-result">= {formatDisplay(currentStep.currentSum)}</div>
                         </div>
                       )}
